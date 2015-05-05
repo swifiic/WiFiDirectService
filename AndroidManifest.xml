@@ -24,7 +24,7 @@
         android:label="@string/app_name"
         android:theme="@style/AppTheme" >
         <activity
-            android:name="com.swifiic.wifidirectservice.MainActivity"
+            android:name="in.swifiic.wifidirectservice.MainActivity"
             android:label="@string/app_name" >
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -33,12 +33,12 @@
             </intent-filter>
         </activity>
         <service
-            android:name="com.swifiic.wifidirectservice.WifiDirectService"
+            android:name="in.swifiic.wifidirectservice.WifiDirectService"
             android:enabled="true"
             android:exported="true" >
         </service>
         <receiver
-            android:name="com.swifiic.wifidirectservice.BootStartUpReciever"
+            android:name="in.swifiic.wifidirectservice.BootStartUpReciever"
             android:enabled="true"
             android:exported="true" >
             <intent-filter>

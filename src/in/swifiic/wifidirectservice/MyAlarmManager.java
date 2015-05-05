@@ -1,4 +1,4 @@
-package com.swifiic.wifidirectservice;
+package in.swifiic.wifidirectservice;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;

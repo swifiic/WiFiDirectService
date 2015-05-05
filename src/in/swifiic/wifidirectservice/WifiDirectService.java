@@ -1,8 +1,10 @@
-package com.swifiic.wifidirectservice;
+package in.swifiic.wifidirectservice;
 
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Random;
+
 import android.annotation.TargetApi;
 import android.app.AlarmManager;
 import android.app.PendingIntent;
@@ -11,7 +13,6 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.net.wifi.WifiConfiguration;
 import android.net.wifi.WifiManager;
 import android.net.wifi.WpsInfo;
 import android.net.wifi.p2p.WifiP2pConfig;
@@ -25,6 +26,7 @@ import android.net.wifi.p2p.WifiP2pManager.ChannelListener;
 import android.net.wifi.p2p.WifiP2pManager.ConnectionInfoListener;
 import android.net.wifi.p2p.WifiP2pManager.PeerListListener;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
 import android.util.Log;
 import android.widget.Toast;
@@ -34,7 +36,6 @@ public class WifiDirectService extends Service implements ChannelListener, PeerL
 	
 	public static final String TAG = "WifiP2pService";
     private WifiP2pManager manager;
-    @SuppressWarnings("unused")
 	private boolean isWifiP2pEnabled = false;
     private boolean retryChannel = false;
     public boolean isConnected = false;
@@ -43,6 +44,9 @@ public class WifiDirectService extends Service implements ChannelListener, PeerL
     private Channel channel;
     private BroadcastReceiver receiver = null;
 	private List<WifiP2pDevice> peers = new ArrayList<WifiP2pDevice>();
+	private boolean isGroupOwner = false;
+	private boolean isGroupCreated = false;
+	
 	public void setIsWifiP2pEnabled(boolean isWifiP2pEnabled) {
         this.isWifiP2pEnabled = isWifiP2pEnabled;
     }
@@ -82,28 +86,14 @@ public class WifiDirectService extends Service implements ChannelListener, PeerL
 	        }
 	    }
 	};
-	
 	@Override
 	public void onDestroy() {
 		disconnect();
 		Toast.makeText(this, "MyService Stopped", Toast.LENGTH_LONG).show();
 		Log.d(TAG, "onDestroy");
+		unregisterReceiver(receiver);
+		unregisterReceiver(broadcastReceiver);
 		super.onDestroy();
-	}
-	
-	public void connectToWifi()
-	{
-		String networkSSID = "test"; // can add details of wifi to be preferred
-		String networkPass = "pass";
-
-		WifiConfiguration conf = new WifiConfiguration();
-		conf.SSID = "\"" + networkSSID + "\"";   // Please note the quotes. String should contain ssid in quotes
-		conf.preSharedKey = "\""+ networkPass +"\"";
-		WifiManager wifiManager = (WifiManager)getSystemService(Context.WIFI_SERVICE); 
-		int netId = wifiManager.addNetwork(conf);
-		wifiManager.disconnect();
-		wifiManager.enableNetwork(netId, true);
-		wifiManager.reconnect();
 	}
 	@Override
 	public int onStartCommand(Intent intent, int flags, int startId) {
@@ -111,20 +101,17 @@ public class WifiDirectService extends Service implements ChannelListener, PeerL
 		Log.d(TAG, "onStart");	
 		receiver = new WiFiDirectBroadcastReceiver(manager, channel, this);
 		registerReceiver(receiver, intentFilter);
-		findPeers();
-		//throttle();
 		return super.onStartCommand(intent, flags, startId);
 	}
 	
-	public void findPeers() //runs discover peers which causes it to send an intent to the broadcastreciever
+	private synchronized void findPeers() //runs discover peers which causes it to send an intent to the broadcastreciever
 	{
 		//Toast.makeText(this, "Finding Peers", Toast.LENGTH_SHORT).show();
 		manager.stopPeerDiscovery(channel, new WifiP2pManager.ActionListener() {
 
             @Override
             public void onSuccess() {
-                Toast.makeText(WifiDirectService.this, "stop Discovery Initiated",
-                        Toast.LENGTH_SHORT).show();
+                //Toast.makeText(WifiDirectService.this, "stop Discovery Initiated", Toast.LENGTH_SHORT).show();
             }
 
             @Override
@@ -137,8 +124,7 @@ public class WifiDirectService extends Service implements ChannelListener, PeerL
 
             @Override
             public void onSuccess() {
-                Toast.makeText(WifiDirectService.this, "Discovery Initiated",
-                        Toast.LENGTH_SHORT).show();
+                //Toast.makeText(WifiDirectService.this, "Discovery Initiated", Toast.LENGTH_SHORT).show();
             }
 
             @Override
@@ -151,25 +137,24 @@ public class WifiDirectService extends Service implements ChannelListener, PeerL
             }
         });
 	}
-	public void throttle() //TODO
+	private synchronized void throttle() //TODO
 	{
+		//
 		Intent intent = new Intent(this, MyAlarmManager.class);
-		long scTime = 60*1/2*1000;//1/2mins
+		long scTime = (60*1/2)*1000;//1/2mins
 		PendingIntent pendingIntent = PendingIntent.getBroadcast(this, 0, intent, 0);
 		AlarmManager alarmManager = (AlarmManager) getSystemService(ALARM_SERVICE);
 		alarmManager.set(AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + scTime, pendingIntent);
-		
 		findPeers();	//calling findPeers() after 2 min	
-		
-		
 	}
 	
-	public void connect(WifiP2pConfig config) { // connects to the specified device config
-    	Toast.makeText(WifiDirectService.this, "Connecting...", Toast.LENGTH_SHORT).show();
+	private synchronized void connect(WifiP2pConfig config) { // connects to the specified device config
+    	Toast.makeText(WifiDirectService.this, "Connecting to " + config.deviceAddress, Toast.LENGTH_SHORT).show();
         manager.connect(channel, config, new ActionListener() {
-        	
             @Override
             public void onSuccess() {
+            	Toast.makeText(WifiDirectService.this, "Connect done.",
+                        Toast.LENGTH_SHORT).show();
                 // WiFiDirectBroadcastReceiver will notify us. Ignore for now.
             }
 
@@ -181,97 +166,138 @@ public class WifiDirectService extends Service implements ChannelListener, PeerL
         });
     }
 	
-    public void disconnect() { // disconnects the specified device
-        manager.removeGroup(channel, new ActionListener() {
-
+    private synchronized void disconnect() { // disconnects all connections
+        manager.removeGroup(channel, new ActionListener() 
+        {
             @Override
-            public void onFailure(int reasonCode) {
+            public void onFailure(int reasonCode) 
+            {
                 Log.d(TAG, "Disconnect failed. Reason :" + reasonCode);
-
             }
-
             @Override
-            public void onSuccess() {
+            public void onSuccess() 
+            {
             	//TODO
             }
-
         });
     }
-	
     @Override
-	public void onPeersAvailable(WifiP2pDeviceList peerList) { 
+	public synchronized void onPeersAvailable(final WifiP2pDeviceList peerList) 
+    { 
     	// runs whenever wifidirectbroadcastreciever recieves a  WIFI_P2P_PEERS_CHANGED_ACTION intent
 		Toast.makeText(WifiDirectService.this, "Checking Peer List", Toast.LENGTH_SHORT).show();
         peers.clear();
         peers.addAll(peerList.getDeviceList());
-        if (peers.size() == 0) {
+        if (peers.size() == 0) 
+        {
             Log.d(WifiDirectService.TAG, "No devices found");
-            Toast.makeText(this, "No Peers found", Toast.LENGTH_SHORT).show();
+            //Toast.makeText(this, "No Peers found", Toast.LENGTH_SHORT).show();
             findPeers();
-            //throttle();
-            //pService.isConnected = false;
+            throttle();
             return;
         }
-        
-        //else if(isConnected == false){
-        else{
-        	Toast.makeText(this, "No Peers found", Toast.LENGTH_SHORT).show();
-        	//WifiP2pDevice deviceTemp = peers.get(0);
-        	for (Iterator<WifiP2pDevice> iter = peers.iterator(); iter.hasNext(); ) {
-        	    WifiP2pDevice element = iter.next();
-        	    int flag = 0;
-				//manager.createGroup(channel, listener);
-        	    for (Iterator<WifiP2pDevice> it = peers.iterator(); it.hasNext(); ) {
-        	    	WifiP2pDevice device = it.next();
-        	    	
-        	    	if(device.status == WifiP2pDevice.INVITED)
-        	    	{
-        	    		flag = 1;
-        	    		break;
-        	    	}
-        	    }
-        	    if(element.status == WifiP2pDevice.CONNECTED || element.status == WifiP2pDevice.INVITED)
-        	    	continue;
-        	    
-        	    if(flag == 1)
-        	    	break;
-        	    if(element.isGroupOwner())
-        	    {
-        	    	WifiP2pConfig config = new WifiP2pConfig();
-	                config.deviceAddress = element.deviceAddress;
-	                config.wps.setup = WpsInfo.PBC;
-	                connect(config);
-	                break;
-        	    }
-        	    if(element.status == WifiP2pDevice.AVAILABLE)
-        	    {
-	        	    WifiP2pConfig config = new WifiP2pConfig();
-	                config.deviceAddress = element.deviceAddress;
-	                config.wps.setup = WpsInfo.PBC;
-	                connect(config);
-        	    }
-        	}
+        else
+        {
+        	//Toast.makeText(this, "Peers found " + peers.size(), Toast.LENGTH_SHORT).show();
+        	//case 1: I am the group owner then send a request to everyone
+    	    if(isGroupOwner == true && isGroupCreated == true)
+    	    {
+    	    	//I need to send request to every peer
+    	    	//Toast.makeText(this, "Case 1", Toast.LENGTH_SHORT).show();
+    	    	Log.d(WifiDirectService.TAG, "Case 1");
+    	    	for (Iterator<WifiP2pDevice> iter = peers.iterator(); iter.hasNext(); )
+    	    	{
+    	    		WifiP2pDevice element = iter.next();
+    	    		if(element.status == WifiP2pDevice.AVAILABLE)
+    	    		{
+    	    			WifiP2pConfig config = new WifiP2pConfig();
+    	                config.deviceAddress = element.deviceAddress;
+    	                config.wps.setup = WpsInfo.PBC;
+    	                connect(config);
+    	    		}
+    	    		else; //need to handle other statuses?
+    	    	}
+    	    }
+    	    //case 2: if some other device is a group owner then send wait for a request
+    	    if(isGroupOwner == false && isGroupCreated == false)
+    	    {
+    	    	//this means I am not connected to any other device so connect to the
+    	    	//group owner if existing
+    	    	//Toast.makeText(this, "Case 2", Toast.LENGTH_SHORT).show();
+    	    	boolean isGroupOwnerFound = false;
+    	    	Log.d(WifiDirectService.TAG, "Case 2");
+    	    	for (Iterator<WifiP2pDevice> iter = peers.iterator(); iter.hasNext(); ) 
+    	    	{
+            	    WifiP2pDevice element = iter.next();            	    
+            	    if(element.isGroupOwner())
+            	    {
+    	                isGroupOwnerFound = true;
+    	                break;
+            	    }
+            	}
+    	    	//case 3: race condition, no group has been created
+    	    	//and requires a group to be created. so wait a random time and connect to the other peer 
+    	    	if(isGroupOwnerFound == false)
+    	    	{
+    	    		Log.d(WifiDirectService.TAG, "Case 3");
+    	    		//Toast.makeText(this, "Possible Race Condition", Toast.LENGTH_SHORT).show();
+    	    		Random r = new Random();
+    	    		int randomInterval = r.nextInt(25000 - 1000) + 1000;//1000ms to 25000ms
+    	    		final Handler handler = new Handler();
+    	    		Toast.makeText(this, "waiting for " + randomInterval, Toast.LENGTH_SHORT).show();
+    	    		handler.postDelayed(new Runnable() 
+    	    		{
+    	    		  @Override
+    	    		  public void run() 
+    	    		  {
+    	    			  peers.clear();
+    	    		      peers.addAll(peerList.getDeviceList());
+    	    			  //Toast.makeText(context, "in run", Toast.LENGTH_SHORT).show();
+    	    			  //TODO confusing part... does the status of the device gets refreshed after connecting?
+    	    			  if(!peers.isEmpty() && (peers.get(0).status == WifiP2pDevice.CONNECTED || peers.get(0).status == WifiP2pDevice.INVITED))
+    	    			  {
+    	    				  //already connected do nothing
+    	    			  }
+    	    			  else if(!peers.isEmpty())
+    	    			  {
+    	    				  Log.d(WifiDirectService.TAG, "in run connect");
+    	    				  //not connected need to connect
+    	    				  WifiP2pConfig config = new WifiP2pConfig();
+    	    	              config.deviceAddress = peers.get(0).deviceAddress;
+    	    	              config.wps.setup = WpsInfo.PBC;
+    	    	              connect(config);
+    	    			  }
+    	    		  }
+    	    		}, randomInterval);
+    	    	}
+    	    }
+    	    
+        	
         }
     }
 
 	@Override
-    public void onChannelDisconnected() {
+    public void onChannelDisconnected() 
+	{
         // we will try once more
-        if (manager != null && !retryChannel) {
+        if (manager != null && !retryChannel)
+        {
             Toast.makeText(this, "Channel lost. Trying again", Toast.LENGTH_LONG).show();
-            //resetData();
             retryChannel = true;
             manager.initialize(this, getMainLooper(), this);
-        } else {
-            Toast.makeText(this,
-                    "Severe! Channel is probably lost permanently. Try Disable/Re-Enable P2P.",
+        }
+        else 
+        {
+            Toast.makeText(this, "Severe! Channel is probably lost permanently. Try Disable/Re-Enable P2P.",
                     Toast.LENGTH_LONG).show();
         }
     }
 
 	@Override
-	public void onConnectionInfoAvailable(WifiP2pInfo info) {
-		// TODO Auto-generated method stub
-		
+	public void onConnectionInfoAvailable(WifiP2pInfo info) 
+	{
+		isGroupOwner = info.isGroupOwner;
+		isGroupCreated =  info.groupFormed;
+		//TODO need to refresh this after every connection
 	}
 }

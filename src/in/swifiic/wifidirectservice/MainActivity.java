@@ -1,4 +1,4 @@
-package com.swifiic.wifidirectservice;
+package in.swifiic.wifidirectservice;
 
 import com.example.bootstart.R;
 
